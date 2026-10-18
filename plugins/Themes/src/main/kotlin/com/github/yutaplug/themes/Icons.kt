@@ -47,14 +47,17 @@ internal class IconEntry(source: String, val keepColors: Boolean) {
         const val KEEP_COLORS = "keep_colors"
         private const val DRAWABLE_PREFIX = "@drawable/"
 
+        // Not isNotBlank(): it iterates an IntRange, which crashes under Discord's renamed stdlib.
+        private fun String.hasText() = trim().isNotEmpty()
+
         fun parse(value: Any?): IconEntry? = when (value) {
             is String -> {
-                value.takeIf { it.isNotBlank() }?.let { IconEntry(it, false) }
+                value.takeIf { it.hasText() }?.let { IconEntry(it, false) }
             }
 
             is JSONObject -> {
-                (value.optString("drawable").takeIf { it.isNotBlank() } ?: value.optString("url"))
-                    .takeIf { it.isNotBlank() }
+                (value.optString("drawable").takeIf { it.hasText() } ?: value.optString("url"))
+                    .takeIf { it.hasText() }
                     ?.let { IconEntry(it, value.optBoolean(KEEP_COLORS, false)) }
             }
 
