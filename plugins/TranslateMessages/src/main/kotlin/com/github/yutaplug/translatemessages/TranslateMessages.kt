@@ -21,6 +21,8 @@ import com.discord.models.message.Message
 import com.discord.stores.StoreStream
 import com.discord.utilities.color.ColorCompat
 import com.discord.utilities.view.text.SimpleDraweeSpanTextView
+import com.discord.widgets.chat.input.autocomplete.ApplicationCommandChoiceAutocompletable
+import com.discord.widgets.chat.input.autocomplete.AutocompleteExtensionsKt
 import com.discord.widgets.chat.list.actions.WidgetChatListActions
 import com.discord.widgets.chat.list.adapter.WidgetChatListAdapter
 import com.discord.widgets.chat.list.adapter.WidgetChatListAdapterItemMessage
@@ -188,6 +190,21 @@ class TranslateMessages : Plugin() {
         patcher.patch(
             WidgetChatListActions::class.java.getDeclaredMethod("configureUI", WidgetChatListActions.Model::class.java),
             Hook { call -> configureMenu(call.thisObject as WidgetChatListActions, call.args[0] as WidgetChatListActions.Model) },
+        )
+        // Discord swaps every command choice name found in a free-text option for the choice's value,
+        // so "I like German bread" was sent as "I like de bread". Choices never belong in free text.
+        patcher.patch(
+            AutocompleteExtensionsKt::class.java.getDeclaredMethod(
+                "replaceAutocompleteDataWithServerValues",
+                String::class.java,
+                Map::class.java,
+            ),
+            PreHook { call ->
+                val mentions = call.args[1] as Map<*, *>
+                if (mentions.values.any { it is ApplicationCommandChoiceAutocompletable }) {
+                    call.args[1] = mentions.filterValues { it !is ApplicationCommandChoiceAutocompletable }
+                }
+            },
         )
         registerCommand()
     }

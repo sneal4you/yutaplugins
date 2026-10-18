@@ -1,8 +1,11 @@
-version = "1.0.2"
+version = "1.0.3"
 description = "Translate messages from the message menu, or automatically, into the language you choose."
 
 aliucord {
     changelog.set("""
+        # 1.0.3
+        * Fixed language names in a /translate message, like German, being changed into codes such as "de".
+
         # 1.0.2
         * Added a /translate command that translates a message and sends it.
         * Moved the Translate button to the bottom of the message menu.
