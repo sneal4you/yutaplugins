@@ -23,6 +23,7 @@ import com.aliucord.patcher.PreHook
 import com.aliucord.utils.GsonUtils
 import com.aliucord.wrappers.users.globalName
 import com.discord.models.user.CoreUser
+import com.discord.models.user.MeUser
 import com.discord.stores.StoreStream
 import com.discord.utilities.captcha.CaptchaErrorBody
 import com.discord.utilities.captcha.CaptchaHelper
@@ -59,6 +60,7 @@ class ProfileIdentity : Plugin() {
     private val editorClass = WidgetEditUserOrGuildMemberProfile::class.java
     private val editors = WeakHashMap<WidgetEditUserOrGuildMemberProfile, Editor>()
     private val openDialogs = WeakHashMap<ConfirmDialog, Boolean>()
+    private val headerStates = WeakHashMap<UserProfileHeaderView, UserProfileHeaderViewModel.ViewState.Loaded>()
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile private var running = false
@@ -91,6 +93,18 @@ class ProfileIdentity : Plugin() {
                 editor.loaded = loaded
                 loadPronouns(editor, loaded)
                 refreshFab(editor)
+            },
+        )
+
+        // Remember what each profile header shows, so a saved display name can reach headers on other pages.
+        patcher.patch(
+            UserProfileHeaderView::class.java.getDeclaredMethod(
+                "updateViewState",
+                UserProfileHeaderViewModel.ViewState.Loaded::class.java,
+            ),
+            Hook { frame ->
+                headerStates[frame.thisObject as UserProfileHeaderView] =
+                    frame.args[0] as UserProfileHeaderViewModel.ViewState.Loaded
             },
         )
 
@@ -334,8 +348,33 @@ class ProfileIdentity : Plugin() {
             me.globalName = value
             (users.users[me.id] as? CoreUser)?.globalName = value
             editor.loaded?.user?.globalName = value
+            updateOtherHeaders(editor, me.id, value)
         } catch (error: Throwable) {
             logger.error("Failed to update the cached display name", error)
+        }
+    }
+
+    /**
+     * Other pages' headers (like the main settings page) keep the user they last got, and the store never sends them
+     * a new one for a name-only change. They replay that state when the page resumes, so rename it there too.
+     */
+    private fun updateOtherHeaders(editor: Editor, meId: Long, name: String?) {
+        val ownHeader = editor.root.findViewById<View>(Utils.getResId("user_settings_profile_header_view", "id"))
+        for ((header, state) in headerStates.entries.toList()) {
+            val user = state.user
+            if (user.id != meId) continue
+            when (user) {
+                is MeUser -> user.globalName = name
+                is CoreUser -> user.globalName = name
+                else -> continue
+            }
+            // refreshHeader redraws this page's own header; detached ones redraw from the renamed state on resume.
+            if (header === ownHeader || !header.isAttachedToWindow) continue
+            try {
+                header.updateViewState(state)
+            } catch (error: Throwable) {
+                logger.error("Failed to refresh a profile header", error)
+            }
         }
     }
 
@@ -474,6 +513,7 @@ class ProfileIdentity : Plugin() {
                 }
             }
             editors.clear()
+            headerStates.clear()
         }
         if (Looper.myLooper() == Looper.getMainLooper()) cleanup.run() else mainHandler.post(cleanup)
     }
