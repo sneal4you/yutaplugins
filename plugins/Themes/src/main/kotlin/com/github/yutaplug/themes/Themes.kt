@@ -10,6 +10,7 @@ import com.aliucord.Utils
 import com.aliucord.annotations.AliucordPlugin
 import com.aliucord.entities.Plugin
 import com.aliucord.fragments.ConfirmDialog
+import com.aliucord.fragments.FragmentProxy
 import com.aliucord.patcher.Hook
 import com.aliucord.patcher.PreHook
 import com.aliucord.utils.RxUtils.subscribe
@@ -125,8 +126,28 @@ class Themes : Plugin() {
         if (activity.isFinishing || activity.isDestroyed) return
         if (rendered[activity] == appliedVersion) return
         rendered[activity] = appliedVersion
-        if (activity.intent?.hasExtra("AC_FRAGMENT_ID") == true) return
-        Utils.mainThread.post { if (!activity.isFinishing && !activity.isDestroyed) activity.recreate() }
+        Utils.mainThread.post {
+            if (activity.isFinishing || activity.isDestroyed) return@post
+            if (keepProxyPage(activity)) activity.recreate()
+        }
+    }
+
+    /**
+     * Aliucord settings pages run inside a proxy activity that takes its page from
+     * [FragmentProxy.fragments] once, so a plain recreate would lose the page. For this plugin's own
+     * pages, hand the same page back first: the proxy forwards every lifecycle call to it, so it is
+     * rebuilt in place with the new theme, keeping unsaved editor changes. Other plugins' pages are
+     * left alone and pick the theme up when reopened. Returns whether [activity] may be recreated.
+     */
+    private fun keepProxyPage(activity: AppActivity): Boolean {
+        val id = activity.intent?.getStringExtra("AC_FRAGMENT_ID") ?: return true
+        val page = runCatching {
+            activity.supportFragmentManager.fragments.firstNotNullOfOrNull { (it as? FragmentProxy)?.getmFragment() }
+        }.getOrNull() ?: return false
+        val ownPages = ThemesSettings::class.java.name.substringBeforeLast('.') + "."
+        if (!page.javaClass.name.startsWith(ownPages)) return false
+        FragmentProxy.fragments[id] = page
+        return true
     }
 
     private fun isLight() = (currentTheme ?: StoreStream.getUserSettingsSystem().theme) == "light"

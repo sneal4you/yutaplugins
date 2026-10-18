@@ -1,8 +1,11 @@
-version = "1.0.1"
+version = "1.0.2"
 description = "Aliucord theme engine compatible with Themer themes, that keeps working on modern Android."
 aliucord {
     changelog.set(
         """
+        # 1.0.2
+        * Changes made in the Themes settings and theme editor now apply right away, without going back first.
+
         # 1.0.1
         * Fix the status bar staying hidden after restarting Discord with a theme enabled.
         * Fix icons such as the log out button becoming invisible with themes that use transparent backgrounds.
