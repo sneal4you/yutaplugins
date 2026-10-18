@@ -77,7 +77,7 @@ class Themes : Plugin() {
             PreHook {
                 val activity = it.thisObject as AppActivity
                 refresh(activity)
-                activity.window.decorView.post { showDeadNotice() }
+                Utils.mainThread.post { showDeadNotice() }
             },
         )
 
@@ -88,9 +88,11 @@ class Themes : Plugin() {
         val initial = resolve(download = false)
         apply(initial, recreate = false)
         // Plugins usually start before Discord inflates its views. When enabled later, the open
-        // screen was drawn without the theme and must be rebuilt.
+        // screen was drawn without the theme and must be rebuilt. Only peek at the window: building
+        // it here (findViewById, getDecorView) would happen under Discord's fullscreen splash style,
+        // before onCreate switches themes, and leave the status bar hidden for good.
         currentActivity()?.let { activity ->
-            val content = activity.findViewById<ViewGroup?>(android.R.id.content)
+            val content = activity.window.peekDecorView()?.findViewById<ViewGroup?>(android.R.id.content)
             rendered[activity] = if (content != null && content.childCount > 0) appliedVersion - 1 else appliedVersion
             refresh(activity)
         }
@@ -108,7 +110,7 @@ class Themes : Plugin() {
         ColorEngine.clearCaches(context.resources)
         currentActivity()?.let { activity ->
             ColorEngine.clearCaches(activity.resources)
-            activity.window.decorView.post { if (!activity.isFinishing) activity.recreate() }
+            Utils.mainThread.post { if (!activity.isFinishing) activity.recreate() }
         }
         rendered.clear()
     }
@@ -124,7 +126,7 @@ class Themes : Plugin() {
         if (rendered[activity] == appliedVersion) return
         rendered[activity] = appliedVersion
         if (activity.intent?.hasExtra("AC_FRAGMENT_ID") == true) return
-        activity.window.decorView.post { if (!activity.isFinishing && !activity.isDestroyed) activity.recreate() }
+        Utils.mainThread.post { if (!activity.isFinishing && !activity.isDestroyed) activity.recreate() }
     }
 
     private fun isLight() = (currentTheme ?: StoreStream.getUserSettingsSystem().theme) == "light"

@@ -146,8 +146,9 @@ internal object ColorEngine {
             value.data = override
             return
         }
-        if (!isColor(value.type)) return
-        val color = (if (value.resourceId != 0) s.color(value.resourceId) else null) ?: s.mapValue(value.data)
+        // Literal colors in styles are left alone, as Themer did; see rewrite().
+        if (!isColor(value.type) || value.resourceId == 0) return
+        val color = s.color(value.resourceId) ?: s.mapValue(value.data)
         if (color != null) value.data = color
     }
 
@@ -218,8 +219,12 @@ internal object ColorEngine {
                 continue
             }
             if (!isColor(type)) continue
+            // Literal colors written in XML (resource id 0) are not swapped by value: drawables use them
+            // as masks for their tint, e.g. the log-out icon's #4f545c fill, which a theme making
+            // primary_500 transparent would otherwise erase. Themer never reached these either.
             val resourceId = data[base + STYLE_RESOURCE_ID]
-            val color = (if (resourceId != 0) s.color(resourceId) else null) ?: s.mapValue(data[base + STYLE_DATA])
+            if (resourceId == 0) continue
+            val color = s.color(resourceId) ?: s.mapValue(data[base + STYLE_DATA])
             if (color != null) data[base + STYLE_DATA] = color
         }
     }
@@ -407,13 +412,7 @@ internal object ColorEngine {
                 s.mapValue(param.result as Int)?.let { param.result = it }
             },
         ) { ColorStateList::class.java.getDeclaredMethod("getColorForState", IntArray::class.java, int) }
-        patcher.tryPatch(
-            "ColorStateList.getDefaultColor",
-            Hook { param ->
-                val s = active() ?: return@Hook
-                s.mapValue(param.result as Int)?.let { param.result = it }
-            },
-        ) { ColorStateList::class.java.getDeclaredMethod("getDefaultColor") }
+        // getDefaultColor is not hooked: vector drawables read their literal path colors through it.
     }
 
     // ---- 7. Themer's special keys ----
