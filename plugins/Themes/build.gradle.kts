@@ -1,8 +1,11 @@
-version = "1.0.4"
+version = "1.0.5"
 description = "Aliucord theme engine compatible with Themer themes, that keeps working on modern Android."
 aliucord {
     changelog.set(
         """
+        # 1.0.5
+        * Fix some elements not being themed on some newer Android versions.
+
         # 1.0.4
         * Fix settings pages crashing with an animated background in Chat & Settings transparency mode.
 

@@ -348,6 +348,9 @@ class ThemesSettings(private val plugin: Themes) :
         if (ColorEngine.skippedHooks.isNotEmpty()) {
             lines += "Unsupported on this device: ${ColorEngine.skippedHooks.joinToString()}"
         }
+        if (ColorEngine.fallbackHooks.isNotEmpty()) {
+            lines += "Using fallbacks for: ${ColorEngine.fallbackHooks.joinToString()}"
+        }
         section("Status")
         if (lines.isEmpty()) {
             val enabled = ThemeStore.enabledIds().isNotEmpty()

@@ -55,6 +55,9 @@ internal object ColorEngine {
     /** Hooks that could not be installed on this device, for the settings page. */
     val skippedHooks = ArrayList<String>()
 
+    /** Hooks replaced by their public fallbacks on this device, for the settings page. */
+    val fallbackHooks = ArrayList<String>()
+
     private val bypassing = ThreadLocal<Boolean>()
     private val bypassUsers = AtomicInteger()
 
@@ -96,6 +99,10 @@ internal object ColorEngine {
 
     fun install(patcher: PatcherAPI) {
         skippedHooks.clear()
+        fallbackHooks.clear()
+        // ThemeImpl and ResourcesImpl.loadDrawable are on Android's hidden-API blocklist: while the
+        // restriction is active, reflection cannot see them and the public fallbacks below are used.
+        runCatching { XposedBridge.disableHiddenApiRestrictions() }
         deoptimize()
         patchResourceValues(patcher)
         patchAttributes(patcher)
@@ -107,13 +114,34 @@ internal object ColorEngine {
     }
 
     private fun PatcherAPI.tryPatch(description: String, hook: XC_MethodHook, find: () -> Member?) {
+        if (!tryPatchQuietly(description, hook, find)) skippedHooks += description
+    }
+
+    private fun PatcherAPI.tryPatchQuietly(description: String, hook: XC_MethodHook, find: () -> Member?): Boolean =
         try {
             val member = find() ?: throw NoSuchMethodException(description)
             patch(member, hook)
+            true
         } catch (error: Throwable) {
-            skippedHooks += description
             logger.warn("Themes: skipped hook $description (${error.javaClass.simpleName}: ${error.message})")
+            false
         }
+
+    /**
+     * Patches [primary], or else every one of [fallbacks]; reported as skipped only when all fail.
+     * Returns whether [primary] was patched.
+     */
+    private fun PatcherAPI.tryPatchEither(
+        description: String,
+        hook: XC_MethodHook,
+        primary: (() -> Member?)?,
+        fallbacks: List<Pair<String, () -> Member?>>,
+    ): Boolean {
+        if (primary != null && tryPatchQuietly(description, hook, primary)) return true
+        var any = false
+        fallbacks.forEach { (name, find) -> if (tryPatchQuietly(name, hook, find)) any = true }
+        if (any) fallbackHooks += description else skippedHooks += description
+        return false
     }
 
     private fun Class<*>.methodsNamed(name: String) = declaredMethods.filter { it.name == name }
@@ -157,15 +185,18 @@ internal object ColorEngine {
             val s = active() ?: return@Hook
             applyAttr(s, param.args[0] as Int, param.args[1] as TypedValue)
         }
-        if (Build.VERSION.SDK_INT >= 24 && themeImpl != null) {
-            patcher.tryPatch("ThemeImpl.resolveAttribute", hook) {
-                themeImpl.getDeclaredMethod("resolveAttribute", int, TypedValue::class.java, bool)
-            }
-        } else {
-            patcher.tryPatch("Theme.resolveAttribute", hook) {
-                Resources.Theme::class.java.getDeclaredMethod("resolveAttribute", int, TypedValue::class.java, bool)
-            }
-        }
+        patcher.tryPatchEither(
+            "ThemeImpl.resolveAttribute",
+            hook,
+            themeImpl?.takeIf { Build.VERSION.SDK_INT >= 24 }?.let { type ->
+                { type.getDeclaredMethod("resolveAttribute", int, TypedValue::class.java, bool) }
+            },
+            listOf(
+                "Theme.resolveAttribute" to {
+                    Resources.Theme::class.java.getDeclaredMethod("resolveAttribute", int, TypedValue::class.java, bool)
+                },
+            ),
+        )
         // Discord's helper; resolveAttribute may be inlined into it.
         patcher.tryPatch(
             "ColorCompat.getThemedColor",
@@ -241,37 +272,50 @@ internal object ColorEngine {
         }
         val obtain = Hook { param -> rewrite(param.result, attrsArg(param.args, false)) }
         val resolve = Hook { param -> rewrite(param.result, attrsArg(param.args, true)) }
-        if (Build.VERSION.SDK_INT >= 24 && themeImpl != null) {
-            patcher.tryPatch("ThemeImpl.obtainStyledAttributes", obtain) {
-                themeImpl.getDeclaredMethod(
-                    "obtainStyledAttributes",
-                    Resources.Theme::class.java,
-                    AttributeSet::class.java,
-                    IntArray::class.java,
-                    int,
-                    int,
-                )
-            }
-            patcher.tryPatch("ThemeImpl.resolveAttributes", resolve) {
-                themeImpl.getDeclaredMethod(
-                    "resolveAttributes",
-                    Resources.Theme::class.java,
-                    IntArray::class.java,
-                    IntArray::class.java,
-                )
-            }
-        } else {
-            Resources.Theme::class.java.methodsNamed("obtainStyledAttributes").forEach { method ->
-                patcher.tryPatch("Theme.obtainStyledAttributes(${method.parameterTypes.size})", obtain) { method }
-            }
-            patcher.tryPatch("Theme.resolveAttributes", resolve) {
-                Resources.Theme::class.java.getDeclaredMethod(
-                    "resolveAttributes",
-                    IntArray::class.java,
-                    IntArray::class.java,
-                )
-            }
-        }
+        // The public Theme methods all delegate to ThemeImpl, so either layer sees every array.
+        val impl = themeImpl?.takeIf { Build.VERSION.SDK_INT >= 24 }
+        patcher.tryPatchEither(
+            "ThemeImpl.obtainStyledAttributes",
+            obtain,
+            impl?.let { type ->
+                {
+                    type.getDeclaredMethod(
+                        "obtainStyledAttributes",
+                        Resources.Theme::class.java,
+                        AttributeSet::class.java,
+                        IntArray::class.java,
+                        int,
+                        int,
+                    )
+                }
+            },
+            Resources.Theme::class.java.methodsNamed("obtainStyledAttributes").map { method ->
+                "Theme.obtainStyledAttributes(${method.parameterTypes.size})" to { method }
+            },
+        )
+        patcher.tryPatchEither(
+            "ThemeImpl.resolveAttributes",
+            resolve,
+            impl?.let { type ->
+                {
+                    type.getDeclaredMethod(
+                        "resolveAttributes",
+                        Resources.Theme::class.java,
+                        IntArray::class.java,
+                        IntArray::class.java,
+                    )
+                }
+            },
+            listOf(
+                "Theme.resolveAttributes" to {
+                    Resources.Theme::class.java.getDeclaredMethod(
+                        "resolveAttributes",
+                        IntArray::class.java,
+                        IntArray::class.java,
+                    )
+                },
+            ),
+        )
         patcher.tryPatch("Resources.obtainAttributes", obtain) {
             Resources::class.java.getDeclaredMethod("obtainAttributes", AttributeSet::class.java, IntArray::class.java)
         }
@@ -292,7 +336,7 @@ internal object ColorEngine {
     // ---- 5. Drawables: color values and tints ----
 
     private fun patchDrawables(patcher: PatcherAPI) {
-        val loadDrawable: Method? = runCatching {
+        val implLoadDrawable: Method? = runCatching {
             when {
                 Build.VERSION.SDK_INT >= 26 -> resourcesImpl!!.getDeclaredMethod(
                     "loadDrawable",
@@ -320,27 +364,56 @@ internal object ColorEngine {
                 )
             }
         }.getOrNull()
-        val valueIndex = if (Build.VERSION.SDK_INT >= 24) 1 else 0
-        patcher.tryPatch(
+        // Resources.loadDrawable(TypedValue, id, ...) wraps the ResourcesImpl one and stays reachable
+        // for Discord's target SDK when the hidden-API blocklist hides ResourcesImpl's.
+        val fallbacks =
+            if (Build.VERSION.SDK_INT >= 24) Resources::class.java.methodsNamed("loadDrawable") else emptyList()
+        val primary: (() -> Member?)? = { implLoadDrawable }
+        // The id always follows the TypedValue, whichever overload was hooked.
+        fun valueIndex(args: Array<Any?>) = args.indexOfFirst { it is TypedValue }
+        patcher.tryPatchEither(
             "loadDrawable (colors)",
             PreHook { param ->
                 val s = active() ?: return@PreHook
-                val value = param.args[valueIndex] as? TypedValue ?: return@PreHook
+                val value = param.args.getOrNull(valueIndex(param.args)) as? TypedValue ?: return@PreHook
                 if (!isColor(value.type)) return@PreHook
                 val color = s.mapValue(value.data)
                 if (color != null) value.data = color
             },
-        ) { loadDrawable }
-        patcher.tryPatch(
+            primary,
+            fallbacks.map { method -> "Resources.loadDrawable(${method.parameterTypes.size}) (colors)" to { method } },
+        )
+        fun applyTint(param: XC_MethodHook.MethodHookParam, id: Any?) {
+            val s = state
+            if (s.tintById.size() == 0 || bypassed()) return
+            val tint = s.tint(id as? Int ?: return) ?: return
+            val drawable = param.result as? Drawable ?: return
+            param.result = drawable.mutate().apply { setTint(tint) }
+        }
+        val implTints = patcher.tryPatchEither(
             "loadDrawable (tints)",
             Hook { param ->
-                val s = state
-                if (s.tintById.size() == 0 || bypassed()) return@Hook
-                val tint = s.tint(param.args[valueIndex + 1] as Int) ?: return@Hook
-                val drawable = param.result as? Drawable ?: return@Hook
-                param.result = drawable.mutate().apply { setTint(tint) }
+                val index = valueIndex(param.args)
+                if (index >= 0) applyTint(param, param.args.getOrNull(index + 1))
             },
-        ) { loadDrawable }
+            primary,
+            fallbacks.map { method -> "Resources.loadDrawable(${method.parameterTypes.size}) (tints)" to { method } },
+        )
+        // Resources.getDrawable(id) calls ResourcesImpl.loadDrawable directly, skipping the Resources
+        // fallback above; that is how Discord loads channel icons and the selected channel overlay.
+        if (!implTints && Build.VERSION.SDK_INT >= 24) {
+            patcher.tryPatch(
+                "Resources.getDrawableForDensity (tints)",
+                Hook { param -> applyTint(param, param.args[0]) },
+            ) {
+                Resources::class.java.getDeclaredMethod(
+                    "getDrawableForDensity",
+                    int,
+                    int,
+                    Resources.Theme::class.java,
+                )
+            }
+        }
     }
 
     // ---- 6. Colors without an id (Themer's by-value swap) ----
@@ -422,7 +495,13 @@ internal object ColorEngine {
         resourcesImpl?.let { targets += it.methodsNamed("getValue") }
         // Callers of the by-name Resources.getColor hook.
         targets += android.content.Context::class.java.methodsNamed("getColor")
+        // Callers of the public Theme fallbacks, used when ThemeImpl is hidden.
+        targets += android.content.Context::class.java.methodsNamed("obtainStyledAttributes")
         targets += androidx.core.content.ContextCompat::class.java.methodsNamed("getColor")
+        // Callers of the Resources.getDrawableForDensity fallback.
+        targets += Resources::class.java.methodsNamed("getDrawable")
+        targets += android.content.Context::class.java.methodsNamed("getDrawable")
+        targets += androidx.core.content.ContextCompat::class.java.methodsNamed("getDrawable")
         targets += ColorCompat::class.java.methodsNamed("getColor")
         targets.distinct().forEach { member -> runCatching { XposedBridge.deoptimizeMethod(member) } }
     }
