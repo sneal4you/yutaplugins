@@ -126,6 +126,10 @@ internal object Backgrounds {
             mode == TransparencyMode.CHAT_SETTINGS &&
             (name.lowercase().contains("settings") || SettingsPage::class.java.isAssignableFrom(type))
         ) {
+            // An animated background is a view added as the page's first child, which shifts the
+            // children Aliucord's SettingsPage looks up by position and crashes it. Like Themer,
+            // settings pages only get still backgrounds in this mode.
+            if (ColorEngine.state.animatedWallpaper != null) return
             setBackground(start)
         }
     }
