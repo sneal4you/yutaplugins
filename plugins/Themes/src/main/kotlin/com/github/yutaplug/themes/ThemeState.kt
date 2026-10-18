@@ -25,6 +25,8 @@ internal class ThemeState(
     val fontById: SparseArray<Typeface>,
     val defaultFont: Typeface?,
     val rawById: SparseArray<File>,
+    /** Drawable resource id to the theme image that replaces it. */
+    val iconById: SparseArray<ThemeIcon>,
     val statusBar: Int?,
     val inputBackground: Int?,
     val blockedBackground: Int?,
@@ -43,6 +45,7 @@ internal class ThemeState(
             fontById.size() == 0 &&
             defaultFont == null &&
             rawById.size() == 0 &&
+            iconById.size() == 0 &&
             statusBar == null &&
             inputBackground == null &&
             blockedBackground == null &&
@@ -51,6 +54,8 @@ internal class ThemeState(
     val hasBackground get() = wallpaper != null || animatedWallpaper != null
 
     val hasColors = colorById.size() != 0 || attrById.size() != 0 || valueMap.size() != 0
+
+    val hasIcons get() = iconById.size() != 0
 
     fun color(id: Int): Int? = colorById.find(id)
 
@@ -78,6 +83,7 @@ internal class ThemeState(
             SparseIntArray(),
             SparseArray(),
             null,
+            SparseArray(),
             SparseArray(),
             null,
             null,

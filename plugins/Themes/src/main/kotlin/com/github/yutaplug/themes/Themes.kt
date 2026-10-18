@@ -26,6 +26,7 @@ import java.util.WeakHashMap
 class Themes : Plugin() {
     private var subscription: Subscription? = null
     private var colorsInstalled = false
+    private var iconsInstalled = false
     private var currentTheme: String? = null
 
     /** Bumped by every reload so that only the newest background build is applied. */
@@ -37,6 +38,8 @@ class Themes : Plugin() {
     }
 
     override fun start(context: Context) {
+        ColorEngine.skippedHooks.clear()
+        ColorEngine.fallbackHooks.clear()
         ThemeStore.settings = settings
         ThemeStore.loadThemes()
         ThemeStore.importThemer()
@@ -108,6 +111,7 @@ class Themes : Plugin() {
         subscription = null
         patcher.unpatchAll()
         colorsInstalled = false
+        iconsInstalled = false
         ColorEngine.state = ThemeState.EMPTY
         ColorEngine.clearCaches(context.resources)
         currentActivity()?.let { activity ->
@@ -164,6 +168,10 @@ class Themes : Plugin() {
         if (state.hasColors && !colorsInstalled) {
             ColorEngine.install(patcher)
             colorsInstalled = true
+        }
+        if (state.hasIcons && !iconsInstalled) {
+            Icons.install(patcher)
+            iconsInstalled = true
         }
         ColorEngine.state = state
         appliedVersion++

@@ -28,6 +28,7 @@ internal object ThemeResolver {
         val specials = LinkedHashMap<String, Int>()
         val fonts = LinkedHashMap<String, String>()
         val raws = LinkedHashMap<String, String>()
+        val icons = LinkedHashMap<String, IconEntry>()
         var background: JSONObject? = null
         val warnings = ArrayList<String>()
     }
@@ -80,6 +81,12 @@ internal object ThemeResolver {
         json.optJSONObject("background")?.let { if (it.has("url")) c.background = it }
         json.optJSONObject("fonts")?.let { fonts -> fonts.keys().forEach { c.fonts[it] = fonts.getString(it) } }
         json.optJSONObject("raws")?.let { raws -> raws.keys().forEach { c.raws[it] = raws.getString(it) } }
+        json.optJSONObject("icons")?.let { icons ->
+            icons.keys().forEach { name ->
+                val entry = IconEntry.parse(icons.opt(name))
+                if (entry == null) warn("invalid icon for icons.$name") else c.icons[name] = entry
+            }
+        }
 
         colorsOf("simple_colors") { key, v ->
             when (key) {
@@ -206,6 +213,31 @@ internal object ThemeResolver {
             }
         }
 
+        val iconById = SparseArray<ThemeIcon>()
+        if (ThemeStore.customIcons) {
+            c.icons.forEach { (name, entry) ->
+                val id = Utils.getResId(name, "drawable")
+                if (id == 0) {
+                    warnings += "Unknown drawable $name"
+                    return@forEach
+                }
+                if (entry.isDrawable) {
+                    val target = Utils.getResId(entry.source, "drawable")
+                    when {
+                        target == 0 -> warnings += "Icon $name: unknown drawable ${entry.source}"
+                        target != id -> iconById.put(id, ThemeIcon(name, null, target, entry.keepColors))
+                    }
+                    return@forEach
+                }
+                val source = file(entry.source, "icon $name") ?: return@forEach
+                if (!ThemeIcon.isImage(source)) {
+                    warnings += "Icon $name is not a PNG, JPEG, WebP or GIF image"
+                    return@forEach
+                }
+                iconById.put(id, ThemeIcon(name, source, 0, entry.keepColors))
+            }
+        }
+
         var wallpaper: android.graphics.Bitmap? = null
         var animated: Uri? = null
         var overlayAlpha = 0
@@ -247,6 +279,7 @@ internal object ThemeResolver {
             fontById = fontById,
             defaultFont = defaultFont,
             rawById = rawById,
+            iconById = iconById,
             statusBar = c.specials["statusbar"],
             inputBackground = c.specials["input_background"],
             blockedBackground = c.specials["blocked_bg"],

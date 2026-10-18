@@ -76,7 +76,7 @@ internal fun verifyUntrustedUrl(url: String) {
 }
 
 internal val THEME_KEYS =
-    arrayOf("manifest", "background", "fonts", "raws", "simple_colors", "colors", "drawable_tints")
+    arrayOf("manifest", "background", "fonts", "raws", "simple_colors", "colors", "drawable_tints", "icons")
 
 internal val SIMPLE_KEYS = arrayOf(
     "accent",

@@ -12,6 +12,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.aliucord.Utils
 import com.aliucord.fragments.SettingsPage
 import com.aliucord.utils.DimenUtils
 import com.aliucord.views.TextInput
@@ -21,25 +22,32 @@ import com.lytefast.flexinput.R
 
 /**
  * Browses every name a theme section can set, with a live search and a preview of Discord's own
- * color or icon. Tapping a name opens the color picker; the pick is handed to [onPicked].
+ * color or icon. Tapping a name opens the color picker; the pick is handed to [onPicked]. With a
+ * [chooser], the tapped name goes to it instead, and it calls `done` once something was picked; the
+ * page then closes, right away or as soon as it is back in front.
  */
 internal class NamePickerPage(
     private val type: ColorListPage.Type,
     private val names: () -> List<String>,
     private val existing: Set<String>,
     private val onPicked: (name: String, color: Int) -> Unit,
+    private val subtitle: String = type.title,
+    private val pageTitle: String = if (type == ColorListPage.Type.DRAWABLES) "Add drawable" else "Add color",
+    private val hint: String = "tap one to pick its color",
+    private val chooser: ((name: String, page: NamePickerPage, done: () -> Unit) -> Unit)? = null,
 ) : SettingsPage() {
     private var all: List<String> = emptyList()
     private var shown: List<String> = emptyList()
     private var count: TextView? = null
     private val adapter = Adapter()
+    private var finished = false
 
     override fun onViewBound(view: View) {
         super.onViewBound(view)
         // The list is long (thousands of drawables), so it must recycle rows instead of scrolling a layout.
         removeScrollView()
-        setActionBarTitle(if (type == ColorListPage.Type.DRAWABLES) "Add drawable" else "Add color")
-        setActionBarSubtitle(type.title)
+        setActionBarTitle(pageTitle)
+        setActionBarSubtitle(subtitle)
         val ctx = requireContext()
         linearLayout.setBackgroundColor(ColorCompat.getThemedColor(ctx, R.b.colorBackgroundPrimary))
 
@@ -78,16 +86,43 @@ internal class NamePickerPage(
         count?.text = when {
             all.isEmpty() -> "Everything here is already in the theme."
             shown.isEmpty() -> "No matches."
-            else -> "${shown.size} of ${all.size} · tap one to pick its color"
+            else -> "${shown.size} of ${all.size} · $hint"
         }
     }
 
     private fun pick(name: String) {
+        chooser?.let {
+            it(name, this) { finish() }
+            return
+        }
         val ctx = requireContext()
         showColorPicker(ctx, parentFragmentManager, startColor(ctx, type, name)) { color ->
             onPicked(name, color)
             close()
         }
+    }
+
+    /**
+     * Closes the page; when another page is open on top, once this one is back in front. Tracked
+     * here because pages live inside Aliucord's FragmentProxy, which forwards onResume and onPause
+     * but never attaches the page itself, so its own isResumed stays false.
+     */
+    private fun finish() {
+        finished = true
+        if (inFront) close()
+    }
+
+    private var inFront = false
+
+    override fun onResume() {
+        super.onResume()
+        inFront = true
+        if (finished) Utils.mainThread.post { close() }
+    }
+
+    override fun onPause() {
+        inFront = false
+        super.onPause()
     }
 
     private class Row(

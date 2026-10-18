@@ -99,6 +99,9 @@ internal class ThemeEditor(
                 R.e::class.java.declaredFields.map { it.name }.sorted()
             }
         }
+        entry("Icons", "ic_flex_input_image_24dp_dark") {
+            IconListPage(json.getJSONObject("icons")) { R.e::class.java.declaredFields.map { it.name }.sorted() }
+        }
         divider()
         action("Save", "Write the theme file and apply it if enabled") { save() }
         action("Discard changes", null) {

@@ -333,7 +333,22 @@ class ThemesSettings(private val plugin: Themes) :
                     }
                 },
         )
-        action("Clear downloaded files", "Download theme backgrounds, fonts and sounds again") {
+        add(
+            Utils
+                .createCheckedSetting(
+                    ctx,
+                    CheckedSetting.ViewType.SWITCH,
+                    "Custom icons",
+                    "Use icons from themes",
+                ).apply {
+                    isChecked = ThemeStore.customIcons
+                    setOnCheckedListener {
+                        ThemeStore.customIcons = it
+                        plugin.reload()
+                    }
+                },
+        )
+        action("Clear downloaded files", "Download theme backgrounds, fonts, sounds and icons again") {
             ThemeStore.clearCache()
             plugin.reload { if (view != null) reRender() }
         }

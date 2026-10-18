@@ -14,6 +14,7 @@ internal object ThemeStore {
     private const val KEY_TRANSPARENCY = "transparencyMode"
     private const val KEY_FONTS = "customFonts"
     private const val KEY_SOUNDS = "customSounds"
+    private const val KEY_ICONS = "customIcons"
     private const val KEY_RANDOMIZE = "randomizeOnStart"
     private const val KEY_LAST_RANDOM = "lastRandomTheme"
 
@@ -36,6 +37,10 @@ internal object ThemeStore {
     var customSounds: Boolean
         get() = settings.getBool(KEY_SOUNDS, true)
         set(value) = settings.setBool(KEY_SOUNDS, value)
+
+    var customIcons: Boolean
+        get() = settings.getBool(KEY_ICONS, true)
+        set(value) = settings.setBool(KEY_ICONS, value)
 
     var randomizeOnStart: Boolean
         get() = settings.getBool(KEY_RANDOMIZE, false)

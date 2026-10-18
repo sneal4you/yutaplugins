@@ -196,7 +196,7 @@ class ColorListPage(
     private fun addEntry() {
         val existing = data.keys().asSequence().toSet()
         // The new entry shows up when this page resumes.
-        val picker = NamePickerPage(type, names, existing) { name, color -> data.put(name, color) }
+        val picker = NamePickerPage(type, names, existing, onPicked = { name, color -> data.put(name, color) })
         Utils.openPageWithProxy(requireContext(), picker)
     }
 

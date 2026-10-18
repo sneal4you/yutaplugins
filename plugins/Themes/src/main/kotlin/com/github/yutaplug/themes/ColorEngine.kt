@@ -75,7 +75,7 @@ internal object ColorEngine {
     }
 
     /** Cheap in the common case: the thread-local is only read while some thread is bypassing. */
-    private fun bypassed() = bypassUsers.get() != 0 && bypassing.get() == true
+    fun bypassed() = bypassUsers.get() != 0 && bypassing.get() == true
 
     /** The state to apply on this thread, or null when there is nothing to do. */
     private fun active(): ThemeState? {
@@ -97,13 +97,21 @@ internal object ColorEngine {
         )
     }.getOrNull()
 
-    fun install(patcher: PatcherAPI) {
-        skippedHooks.clear()
-        fallbackHooks.clear()
+    private var prepared = false
+
+    /** One-time setup shared by every resource hook: hidden-API access and deoptimized callers. */
+    @Synchronized
+    fun prepare() {
+        if (prepared) return
+        prepared = true
         // ThemeImpl and ResourcesImpl.loadDrawable are on Android's hidden-API blocklist: while the
         // restriction is active, reflection cannot see them and the public fallbacks below are used.
         runCatching { XposedBridge.disableHiddenApiRestrictions() }
         deoptimize()
+    }
+
+    fun install(patcher: PatcherAPI) {
+        prepare()
         patchResourceValues(patcher)
         patchAttributes(patcher)
         patchTypedArrays(patcher)
@@ -335,8 +343,9 @@ internal object ColorEngine {
 
     // ---- 5. Drawables: color values and tints ----
 
-    private fun patchDrawables(patcher: PatcherAPI) {
-        val implLoadDrawable: Method? = runCatching {
+    private val implLoadDrawable: Method? by lazy {
+        prepare()
+        runCatching {
             when {
                 Build.VERSION.SDK_INT >= 26 -> resourcesImpl!!.getDeclaredMethod(
                     "loadDrawable",
@@ -364,13 +373,55 @@ internal object ColorEngine {
                 )
             }
         }.getOrNull()
-        // Resources.loadDrawable(TypedValue, id, ...) wraps the ResourcesImpl one and stays reachable
-        // for Discord's target SDK when the hidden-API blocklist hides ResourcesImpl's.
-        val fallbacks =
-            if (Build.VERSION.SDK_INT >= 24) Resources::class.java.methodsNamed("loadDrawable") else emptyList()
-        val primary: (() -> Member?)? = { implLoadDrawable }
-        // The id always follows the TypedValue, whichever overload was hooked.
-        fun valueIndex(args: Array<Any?>) = args.indexOfFirst { it is TypedValue }
+    }
+
+    // Resources.loadDrawable(TypedValue, id, ...) wraps the ResourcesImpl one and stays reachable
+    // for Discord's target SDK when the hidden-API blocklist hides ResourcesImpl's.
+    private val loadDrawableFallbacks
+        get() = if (Build.VERSION.SDK_INT >= 24) Resources::class.java.methodsNamed("loadDrawable") else emptyList()
+
+    // The id always follows the TypedValue, whichever overload was hooked.
+    private fun valueIndex(args: Array<Any?>) = args.indexOfFirst { it is TypedValue }
+
+    /**
+     * Calls [after] with the resource id once a drawable resource was loaded, whichever way it was
+     * requested: in ResourcesImpl.loadDrawable, or else in the public Resources paths that reach it.
+     * [after] may replace the result.
+     */
+    fun patchLoadedDrawables(
+        patcher: PatcherAPI,
+        what: String,
+        after: (param: XC_MethodHook.MethodHookParam, id: Int) -> Unit,
+    ) {
+        val impl = patcher.tryPatchEither(
+            "loadDrawable ($what)",
+            Hook { param ->
+                val index = valueIndex(param.args)
+                if (index >= 0) (param.args.getOrNull(index + 1) as? Int)?.let { after(param, it) }
+            },
+            { implLoadDrawable },
+            loadDrawableFallbacks.map { method ->
+                "Resources.loadDrawable(${method.parameterTypes.size}) ($what)" to { method }
+            },
+        )
+        // Resources.getDrawable(id) calls ResourcesImpl.loadDrawable directly, skipping the Resources
+        // fallback above; that is how Discord loads channel icons and the selected channel overlay.
+        if (!impl && Build.VERSION.SDK_INT >= 24) {
+            patcher.tryPatch(
+                "Resources.getDrawableForDensity ($what)",
+                Hook { param -> after(param, param.args[0] as Int) },
+            ) {
+                Resources::class.java.getDeclaredMethod(
+                    "getDrawableForDensity",
+                    int,
+                    int,
+                    Resources.Theme::class.java,
+                )
+            }
+        }
+    }
+
+    private fun patchDrawables(patcher: PatcherAPI) {
         patcher.tryPatchEither(
             "loadDrawable (colors)",
             PreHook { param ->
@@ -380,39 +431,17 @@ internal object ColorEngine {
                 val color = s.mapValue(value.data)
                 if (color != null) value.data = color
             },
-            primary,
-            fallbacks.map { method -> "Resources.loadDrawable(${method.parameterTypes.size}) (colors)" to { method } },
-        )
-        fun applyTint(param: XC_MethodHook.MethodHookParam, id: Any?) {
-            val s = state
-            if (s.tintById.size() == 0 || bypassed()) return
-            val tint = s.tint(id as? Int ?: return) ?: return
-            val drawable = param.result as? Drawable ?: return
-            param.result = drawable.mutate().apply { setTint(tint) }
-        }
-        val implTints = patcher.tryPatchEither(
-            "loadDrawable (tints)",
-            Hook { param ->
-                val index = valueIndex(param.args)
-                if (index >= 0) applyTint(param, param.args.getOrNull(index + 1))
+            { implLoadDrawable },
+            loadDrawableFallbacks.map { method ->
+                "Resources.loadDrawable(${method.parameterTypes.size}) (colors)" to { method }
             },
-            primary,
-            fallbacks.map { method -> "Resources.loadDrawable(${method.parameterTypes.size}) (tints)" to { method } },
         )
-        // Resources.getDrawable(id) calls ResourcesImpl.loadDrawable directly, skipping the Resources
-        // fallback above; that is how Discord loads channel icons and the selected channel overlay.
-        if (!implTints && Build.VERSION.SDK_INT >= 24) {
-            patcher.tryPatch(
-                "Resources.getDrawableForDensity (tints)",
-                Hook { param -> applyTint(param, param.args[0]) },
-            ) {
-                Resources::class.java.getDeclaredMethod(
-                    "getDrawableForDensity",
-                    int,
-                    int,
-                    Resources.Theme::class.java,
-                )
-            }
+        patchLoadedDrawables(patcher, "tints") { param, id ->
+            val s = state
+            if (s.tintById.size() == 0 || bypassed()) return@patchLoadedDrawables
+            val tint = s.tint(id) ?: return@patchLoadedDrawables
+            val drawable = param.result as? Drawable ?: return@patchLoadedDrawables
+            param.result = drawable.mutate().apply { setTint(tint) }
         }
     }
 
