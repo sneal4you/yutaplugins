@@ -5,8 +5,6 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.util.SparseArray
 import android.util.SparseIntArray
-import android.util.TypedValue
-import android.view.ContextThemeWrapper
 import com.aliucord.Constants
 import com.aliucord.Utils
 import org.json.JSONObject
@@ -39,13 +37,7 @@ internal object ThemeResolver {
      * files are listed in [ThemeState.pendingDownloads]. Must run with [ColorEngine] bypassed for the
      * calling thread so that original resource values are read.
      */
-    fun resolve(
-        context: Context,
-        themes: List<ThemeFile>,
-        isLight: Boolean,
-        baseStyle: Int,
-        download: Boolean,
-    ): ThemeState {
+    fun resolve(context: Context, themes: List<ThemeFile>, isLight: Boolean, download: Boolean): ThemeState {
         if (themes.isEmpty()) return ThemeState.EMPTY
         val c = Collected()
         val mappings = attrMappings(isLight)
@@ -58,7 +50,7 @@ internal object ThemeResolver {
                 logger.error("Failed to load theme ${theme.name}", error)
             }
         }
-        return ColorEngine.bypass { build(context, c, baseStyle, download) }
+        return ColorEngine.bypass { build(context, c, download) }
     }
 
     private fun collect(theme: ThemeFile, json: JSONObject, mappings: Map<String, List<String>>, c: Collected) {
@@ -145,61 +137,28 @@ internal object ThemeResolver {
         }
     }
 
-    private fun build(context: Context, c: Collected, baseStyle: Int, download: Boolean): ThemeState {
-        val res = context.resources
+    private fun build(context: Context, c: Collected, download: Boolean): ThemeState {
         val warnings = c.warnings
         val pending = ArrayList<String>()
-        val value = TypedValue()
 
+        // By name: only direct Resources.getColor(id) calls, as in Themer.
         val colorById = SparseIntArray()
-        val selectorById = SparseIntArray()
-        val valueMap = SparseIntArray()
         c.colors.forEach { (name, color) ->
             val id = Utils.getResId(name, "color")
-            if (id == 0) {
-                warnings += "Unknown color $name"
-                return@forEach
-            }
-            val original = try {
-                res.getValue(id, value, true)
-                value.type to value.data
-            } catch (error: Throwable) {
-                null
-            }
-            if (original != null && original.first in TypedValue.TYPE_FIRST_COLOR_INT..TypedValue.TYPE_LAST_COLOR_INT) {
-                colorById.put(id, color)
-                val v = original.second
-                val shared = v in ThemeState.UNLINKED && name != "white" && name != "black"
-                if (v ushr 24 != 0 && !shared) valueMap.put(v, color)
-            } else {
-                // A res/color selector: recolored by default state, keeping its other states.
-                selectorById.put(id, color)
-            }
+            if (id == 0) warnings += "Unknown color $name" else colorById.put(id, color)
+        }
+
+        // By value, everywhere else: a value is swapped only when the theme sets the one name
+        // Themer associates with it, so colors that merely share a value with a themed one keep it.
+        val valueMap = SparseIntArray()
+        CanonicalColors.get(context).forEach { (original, name) ->
+            c.colors[name]?.let { valueMap.put(original, it) }
         }
 
         val attrById = SparseIntArray()
-        val theme = ContextThemeWrapper(context, baseStyle).theme
-        val attrTargets = SparseIntArray()
         c.attrs.forEach { (name, color) ->
             val id = Utils.getResId(name, "attr")
-            if (id == 0) {
-                warnings += "Unknown attribute $name"
-                return@forEach
-            }
-            attrById.put(id, color)
-            // Layouts reach attributes through the color they point at; follow that color too,
-            // unless it is one shared by unrelated UI.
-            if (theme.resolveAttribute(id, value, true) &&
-                value.resourceId != 0 &&
-                value.type in TypedValue.TYPE_FIRST_COLOR_INT..TypedValue.TYPE_LAST_COLOR_INT &&
-                value.data !in ThemeState.UNLINKED
-            ) {
-                attrTargets.put(value.resourceId, color)
-            }
-        }
-        for (i in 0 until attrTargets.size()) {
-            val id = attrTargets.keyAt(i)
-            if (colorById.indexOfKey(id) < 0) colorById.put(id, attrTargets.valueAt(i))
+            if (id == 0) warnings += "Unknown attribute $name" else attrById.put(id, color)
         }
 
         val tintById = SparseIntArray()
@@ -274,14 +233,13 @@ internal object ThemeResolver {
         }
 
         val outputs = HashSet<Int>()
-        listOf(colorById, selectorById, attrById, valueMap).forEach { map ->
+        listOf(colorById, attrById, valueMap).forEach { map ->
             for (i in 0 until map.size()) outputs += map.valueAt(i)
         }
         c.specials.values.forEach { outputs += it }
 
         return ThemeState(
             colorById = colorById,
-            selectorById = selectorById,
             attrById = attrById,
             valueMap = valueMap,
             outputs = outputs.toIntArray().apply { sort() },

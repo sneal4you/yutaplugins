@@ -131,19 +131,10 @@ class Themes : Plugin() {
 
     private fun isLight() = (currentTheme ?: StoreStream.getUserSettingsSystem().theme) == "light"
 
-    private fun baseStyle(): Int {
-        val names = when (currentTheme ?: StoreStream.getUserSettingsSystem().theme) {
-            "light" -> listOf("AppTheme.Light", "AppTheme_Light")
-            "pureEvil" -> listOf("AppTheme.Dark.Evil", "AppTheme_Dark_Evil")
-            else -> listOf("AppTheme.Dark", "AppTheme_Dark")
-        }
-        return names.map { Utils.getResId(it, "style") }.firstOrNull { it != 0 } ?: 0
-    }
-
     private fun resolve(download: Boolean): ThemeState {
         ColorEngine.isLight = isLight()
         return try {
-            ThemeResolver.resolve(Utils.appContext, ThemeStore.enabledThemes(), isLight(), baseStyle(), download)
+            ThemeResolver.resolve(Utils.appContext, ThemeStore.enabledThemes(), isLight(), download)
         } catch (error: Throwable) {
             logger.error("Failed to resolve themes", error)
             ThemeState.EMPTY

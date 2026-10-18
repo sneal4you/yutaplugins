@@ -1,7 +1,6 @@
 package com.github.yutaplug.themes
 
 import android.graphics.Bitmap
-import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.util.SparseArray
@@ -14,13 +13,11 @@ import java.util.Arrays
  * state and swaps it in, so hooks on other threads always read a consistent snapshot.
  */
 internal class ThemeState(
-    /** Color resource id to color. Includes colors reached through overridden theme attributes. */
+    /** Color resource id to color, for direct Resources.getColor(id) calls only (as in Themer). */
     val colorById: SparseIntArray,
-    /** Color state list (selector) resource id to the color replacing its default state. */
-    val selectorById: SparseIntArray,
     /** Theme attribute id to color. */
     val attrById: SparseIntArray,
-    /** Themer's by-value swap: original palette value to new color, for colors without a resource id. */
+    /** Themer's by-value swap: original value to new color, see CanonicalColors. */
     val valueMap: SparseIntArray,
     /** Every color this state produces, sorted; a value fallback never remaps one of these again. */
     private val outputs: IntArray,
@@ -40,7 +37,6 @@ internal class ThemeState(
 ) {
     val isEmpty =
         colorById.size() == 0 &&
-            selectorById.size() == 0 &&
             attrById.size() == 0 &&
             valueMap.size() == 0 &&
             tintById.size() == 0 &&
@@ -54,15 +50,13 @@ internal class ThemeState(
 
     val hasBackground get() = wallpaper != null || animatedWallpaper != null
 
-    val hasColors = colorById.size() != 0 || attrById.size() != 0 || valueMap.size() != 0 || selectorById.size() != 0
+    val hasColors = colorById.size() != 0 || attrById.size() != 0 || valueMap.size() != 0
 
     fun color(id: Int): Int? = colorById.find(id)
 
     fun attr(id: Int): Int? = attrById.find(id)
 
     fun tint(id: Int): Int? = tintById.find(id)
-
-    fun selector(id: Int): Int? = selectorById.find(id)
 
     /** The by-value replacement for [color], or null. Colors this theme already produced are left alone. */
     fun mapValue(color: Int): Int? {
@@ -80,7 +74,6 @@ internal class ThemeState(
             SparseIntArray(),
             SparseIntArray(),
             SparseIntArray(),
-            SparseIntArray(),
             IntArray(0),
             SparseIntArray(),
             SparseArray(),
@@ -95,9 +88,6 @@ internal class ThemeState(
             emptyList(),
             emptyList(),
         )
-
-        /** Values shared by unrelated UI (button labels, scrims), never swapped by value alone. */
-        val UNLINKED = intArrayOf(Color.WHITE, Color.BLACK, Color.TRANSPARENT)
     }
 }
 

@@ -30,18 +30,17 @@ import java.lang.reflect.Method
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Applies a [ThemeState]'s colors.
+ * Applies a [ThemeState]'s colors with Themer's semantics, at hook points that still fire on
+ * current Android:
+ * - by name, only for direct `Resources.getColor(id)` calls (theme attributes through
+ *   `ColorCompat.getThemedColor` and `resolveAttribute`);
+ * - by value everywhere else (see [CanonicalColors]), including the [TypedArray]s and resource
+ *   values Android fills natively. Themer swapped those values only later, in methods that newer
+ *   Android inlines; that is why chat input, DM and channel backgrounds stopped being themed on
+ *   Android 12+.
  *
- * Colors are matched by resource id wherever the framework still knows it, at the lowest Java layer
- * every lookup passes through:
- * - [AssetManager] `getResourceValue`: `Resources.getColor`, `getValue` and color drawables by id;
- * - theme attribute resolution: `resolveAttribute`, `ColorCompat.getThemedColor`;
- * - every [TypedArray] the framework fills natively (styles, layouts, drawable and color XML). These
- *   carry `?attr/` colors, which Themer never saw; they are why chat input, DM and channel
- *   backgrounds stopped being themed on Android 12+.
- *
- * Themer's by-value swap stays as a fallback for colors that arrive without an id (hardcoded
- * colors, literals in styles). It never remaps a color the theme itself produced, so layers do not chain.
+ * Literal colors written in XML are never swapped, and a color the theme itself produced is never
+ * swapped again, so layers do not chain.
  *
  * Hooks are installed once and read [state]; a reload only swaps the state, clears resource caches
  * and recreates the activity. A hook whose method is missing on this Android version is skipped.
@@ -101,7 +100,7 @@ internal object ColorEngine {
         patchResourceValues(patcher)
         patchAttributes(patcher)
         patchTypedArrays(patcher)
-        patchColorStateLists(patcher)
+        patchGetColor(patcher)
         patchDrawables(patcher)
         patchValueSinks(patcher)
         patchSpecials(patcher)
@@ -129,7 +128,7 @@ internal object ColorEngine {
                 val s = active() ?: return@Hook
                 val value = param.args[2] as TypedValue
                 if (!isColor(value.type)) return@Hook
-                val color = s.color(param.args[0] as Int) ?: s.color(value.resourceId) ?: s.mapValue(value.data)
+                val color = s.mapValue(value.data)
                 if (color != null) value.data = color
             },
         ) {
@@ -148,7 +147,7 @@ internal object ColorEngine {
         }
         // Literal colors in styles are left alone, as Themer did; see rewrite().
         if (!isColor(value.type) || value.resourceId == 0) return
-        val color = s.color(value.resourceId) ?: s.mapValue(value.data)
+        val color = s.mapValue(value.data)
         if (color != null) value.data = color
     }
 
@@ -224,7 +223,7 @@ internal object ColorEngine {
             // primary_500 transparent would otherwise erase. Themer never reached these either.
             val resourceId = data[base + STYLE_RESOURCE_ID]
             if (resourceId == 0) continue
-            val color = s.color(resourceId) ?: s.mapValue(data[base + STYLE_DATA])
+            val color = s.mapValue(data[base + STYLE_DATA])
             if (color != null) data[base + STYLE_DATA] = color
         }
     }
@@ -278,52 +277,15 @@ internal object ColorEngine {
         }
     }
 
-    // ---- 4. Color state lists (selectors) by id ----
+    // ---- 4. Colors by name: direct Resources.getColor(id) calls, as in Themer ----
 
-    private val getStates: Method? = runCatching {
-        ColorStateList::class.java.getDeclaredMethod("getStates").apply { isAccessible = true }
-    }.getOrNull()
-    private val getColors: Method? = runCatching {
-        ColorStateList::class.java.getDeclaredMethod("getColors").apply { isAccessible = true }
-    }.getOrNull()
-
-    /** Recolors the entries sharing the list's default color, keeping each entry's own alpha. */
-    private fun recolor(list: ColorStateList, color: Int): ColorStateList {
-        val default = bypass { list.defaultColor }
-
-        @Suppress("UNCHECKED_CAST")
-        val states = getStates?.invoke(list) as? Array<IntArray>
-        val colors = getColors?.invoke(list) as? IntArray
-        if (states == null || colors == null || states.size != colors.size) return ColorStateList.valueOf(color)
-        val rgb = default and 0xffffff
-        val recolored = IntArray(colors.size) { i ->
-            val c = colors[i]
-            if (c and 0xffffff != rgb) {
-                c
-            } else {
-                val alpha = ((c ushr 24) * (color ushr 24) + 127) / 255
-                (alpha shl 24) or (color and 0xffffff)
-            }
-        }
-        return ColorStateList(states, recolored)
-    }
-
-    private fun patchColorStateLists(patcher: PatcherAPI) {
+    private fun patchGetColor(patcher: PatcherAPI) {
         val hook = Hook { param ->
             val s = active() ?: return@Hook
-            val list = param.result as? ColorStateList ?: return@Hook
-            val id = param.args.firstOrNull { it is Int } as? Int ?: return@Hook
-            val color = s.selector(id) ?: return@Hook
-            param.result = recolor(list, color)
+            s.color(param.args[0] as Int)?.let { param.result = it }
         }
-        val owner = if (Build.VERSION.SDK_INT >= 24 && resourcesImpl != null) resourcesImpl else Resources::class.java
-        owner.methodsNamed("loadColorStateList").forEach { method ->
-            patcher.tryPatch("${owner.simpleName}.loadColorStateList", hook) { method }
-        }
-        if (Build.VERSION.SDK_INT >= 24 && resourcesImpl != null) {
-            resourcesImpl.methodsNamed("loadComplexColor").forEach { method ->
-                patcher.tryPatch("ResourcesImpl.loadComplexColor", hook) { method }
-            }
+        Resources::class.java.methodsNamed("getColor").forEach { method ->
+            patcher.tryPatch("Resources.getColor(${method.parameterTypes.size})", hook) { method }
         }
     }
 
@@ -365,7 +327,7 @@ internal object ColorEngine {
                 val s = active() ?: return@PreHook
                 val value = param.args[valueIndex] as? TypedValue ?: return@PreHook
                 if (!isColor(value.type)) return@PreHook
-                val color = (if (value.resourceId != 0) s.color(value.resourceId) else null) ?: s.mapValue(value.data)
+                val color = s.mapValue(value.data)
                 if (color != null) value.data = color
             },
         ) { loadDrawable }
@@ -458,6 +420,10 @@ internal object ColorEngine {
             ColorCompat::class.java to "getThemedColor",
         ).forEach { (type, name) -> targets += type.methodsNamed(name) }
         resourcesImpl?.let { targets += it.methodsNamed("getValue") }
+        // Callers of the by-name Resources.getColor hook.
+        targets += android.content.Context::class.java.methodsNamed("getColor")
+        targets += androidx.core.content.ContextCompat::class.java.methodsNamed("getColor")
+        targets += ColorCompat::class.java.methodsNamed("getColor")
         targets.distinct().forEach { member -> runCatching { XposedBridge.deoptimizeMethod(member) } }
     }
 
