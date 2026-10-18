@@ -67,3 +67,8 @@ internal fun SettingsPage.divider() {
 internal fun SettingsPage.add(view: View, height: Int = LinearLayout.LayoutParams.WRAP_CONTENT) {
     linearLayout.addView(view, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, height))
 }
+
+/** A page of this plugin that can be replaced by a fresh copy when a theme change must show. */
+interface ReopenablePage {
+    fun reopen(): androidx.fragment.app.Fragment
+}

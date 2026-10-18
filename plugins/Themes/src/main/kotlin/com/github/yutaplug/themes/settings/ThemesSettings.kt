@@ -31,7 +31,11 @@ import com.github.yutaplug.themes.isThemerActive
 import com.github.yutaplug.themes.logger
 import com.lytefast.flexinput.R
 
-class ThemesSettings(private val plugin: Themes) : SettingsPage() {
+class ThemesSettings(private val plugin: Themes) :
+    SettingsPage(),
+    ReopenablePage {
+    override fun reopen() = ThemesSettings(plugin)
+
     override fun onViewBound(view: View) {
         super.onViewBound(view)
         setActionBarTitle("Themes")

@@ -33,11 +33,19 @@ import com.lytefast.flexinput.R
 import org.json.JSONObject
 
 /** Edits one theme file. Changes stay in memory until Save. */
-internal class ThemeEditor(private val plugin: Themes, private val theme: ThemeFile) : SettingsPage() {
-    private val json: JSONObject = run {
+internal class ThemeEditor(
+    private val plugin: Themes,
+    private val theme: ThemeFile,
+    /** Unsaved edits carried over when the page is reopened after a theme change. */
+    edits: JSONObject? = null,
+) : SettingsPage(),
+    ReopenablePage {
+    private val json: JSONObject = edits ?: run {
         runCatching { theme.convertIfLegacy() }
         theme.json().apply { THEME_KEYS.forEach { if (optJSONObject(it) == null) put(it, JSONObject()) } }
     }
+
+    override fun reopen() = ThemeEditor(plugin, theme, json)
 
     override fun onViewBound(view: View) {
         super.onViewBound(view)
