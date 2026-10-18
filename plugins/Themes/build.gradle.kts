@@ -1,8 +1,11 @@
-version = "1.0.6"
+version = "1.0.7"
 description = "Aliucord theme engine compatible with Themer themes, that keeps working on modern Android."
 aliucord {
     changelog.set(
         """
+        # 1.0.7
+        * Backgrounds, fonts, sounds and icons can now be picked from your gallery or files app in the theme editor, not only added as links.
+
         # 1.0.6
         * Themes can now replace any of Discord's icons, with an image or with another Discord icon. Set them in the new Icons page of the theme editor.
         * Added a Custom icons switch to turn off icons from themes.

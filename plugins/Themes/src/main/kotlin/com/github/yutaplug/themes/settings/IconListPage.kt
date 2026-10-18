@@ -163,7 +163,8 @@ internal class IconListPage(private val data: JSONObject, private val names: () 
             title = key
             items = arrayOf(
                 "Use another Discord icon",
-                "Use an image",
+                "Use an image link",
+                "Use an image from your device",
                 if (keep) "Tint like Discord's icons" else "Keep its own colors",
                 "Remove",
             )
@@ -183,13 +184,17 @@ internal class IconListPage(private val data: JSONObject, private val names: () 
                     }
 
                     2 -> {
+                        ThemeFilePicker.open(this@IconListPage.requireActivity(), ThemeFileKind.IMAGE) { update(it) }
+                    }
+
+                    3 -> {
                         if (entry != null) {
                             data.put(key, IconEntry(entry.source, !keep).toJson())
                             renderRows()
                         }
                     }
 
-                    3 -> {
+                    4 -> {
                         confirmRemove(key)
                     }
                 }
@@ -229,12 +234,12 @@ internal class IconListPage(private val data: JSONObject, private val names: () 
                 }
                 SelectDialog().apply {
                     title = "Replace $name with"
-                    items = arrayOf("Another Discord icon", "An image")
+                    items = arrayOf("Another Discord icon", "An image link", "An image from your device")
                     onResultListener = { which ->
-                        if (which == 0) {
-                            pickDrawable(page, name, put)
-                        } else {
-                            askImage(page.parentFragmentManager, name, "", put)
+                        when (which) {
+                            0 -> pickDrawable(page, name, put)
+                            1 -> askImage(page.parentFragmentManager, name, "", put)
+                            else -> ThemeFilePicker.open(page.requireActivity(), ThemeFileKind.IMAGE, put)
                         }
                     }
                 }.show(page.parentFragmentManager, "ThemesIconSource")

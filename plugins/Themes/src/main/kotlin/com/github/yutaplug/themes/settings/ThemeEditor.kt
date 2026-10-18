@@ -60,8 +60,8 @@ internal class ThemeEditor(
 
         val hosts = ALLOWED_RESOURCE_DOMAINS.joinToString()
         note(
-            "Images, fonts and sounds must be https links on: $hosts, or file:// paths. " +
-                "Discord links expire, so they can't be used.",
+            "Images, fonts and sounds must be https links on: $hosts, or files from your device: tap the " +
+                "folder button in a field to pick one. Discord links expire, so they can't be used.",
         )
         entry("Manifest", "ic_audit_logs_24dp") {
             FormPage(
@@ -77,14 +77,14 @@ internal class ThemeEditor(
                 arrayOf("url", "overlay_alpha", "blur_radius"),
                 json.getJSONObject("background"),
                 Validators::background,
-            )
+            ) { key -> ThemeFileKind.IMAGE.takeIf { key == "url" } }
         }
         entry("Fonts", "ic_edit_24dp") {
             val names = arrayOf("*") + ThemeResolver.fontIds().keys.sorted()
-            FormPage("Fonts", names, json.getJSONObject("fonts"), Validators::url)
+            FormPage("Fonts", names, json.getJSONObject("fonts"), Validators::url) { ThemeFileKind.FONT }
         }
         entry("Sounds", "ic_sound_24dp") {
-            FormPage("Sounds", SIMPLE_SOUND_NAMES, json.getJSONObject("raws"), Validators::url)
+            FormPage("Sounds", SIMPLE_SOUND_NAMES, json.getJSONObject("raws"), Validators::url) { ThemeFileKind.SOUND }
         }
         entry("Simple colors", "ic_accessibility_24dp") {
             ColorListPage(ColorListPage.Type.SIMPLE, json.getJSONObject("simple_colors")) { SIMPLE_KEYS.toList() }

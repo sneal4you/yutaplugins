@@ -16,6 +16,8 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
 import android.widget.LinearLayout
+import androidx.core.content.ContextCompat
+import com.aliucord.Utils
 import com.aliucord.fragments.SettingsPage
 import com.aliucord.utils.DimenUtils
 import com.aliucord.views.TextInput
@@ -26,12 +28,16 @@ import org.json.JSONObject
 import java.io.File
 import java.util.regex.Pattern
 
-/** A page of text fields bound to the keys of one theme section. Invalid values are not stored. */
-class FormPage(
+/**
+ * A page of text fields bound to the keys of one theme section. Invalid values are not stored.
+ * Fields for which [fileKind] returns a kind get a button that fills them with a file from the device.
+ */
+internal class FormPage(
     private val title: String,
     private val keys: Array<String>,
     private val data: JSONObject,
     private val validator: (key: String, value: String) -> Boolean,
+    private val fileKind: (key: String) -> ThemeFileKind? = { null },
 ) : SettingsPage() {
     override fun onViewBound(view: View) {
         super.onViewBound(view)
@@ -42,12 +48,25 @@ class FormPage(
         keys.forEach { key ->
             val input = TextInput(requireContext(), key, data.opt(key)?.toString().orEmpty())
             val edit = input.editText
+            val kind = fileKind(key)
+            if (kind != null) {
+                ContextCompat.getDrawable(requireContext(), Utils.getResId("ic_guild_folder", "drawable"))?.let {
+                    input.setThemedEndIcon(it)
+                }
+                input.root.endIconContentDescription = "Pick ${kind.what} from your device"
+                input.root.setEndIconOnClickListener {
+                    ThemeFilePicker.open(requireActivity(), kind) { url -> edit.setText(url) }
+                }
+                input.root.isEndIconVisible = true
+            }
             edit.addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
 
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
 
                 override fun afterTextChanged(editable: Editable?) {
+                    // TextInput hides its end icon while the field is empty; the file button must stay.
+                    if (kind != null) input.root.isEndIconVisible = true
                     val value = edit.text.toString().trim()
                     input.root.hint = key
                     when {
