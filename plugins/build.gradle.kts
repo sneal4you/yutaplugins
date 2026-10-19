@@ -41,7 +41,7 @@ subprojects {
         author("yutaplug", 1202406828248408134L, hyperlink = true)
 
         // TODO: Change to your repository
-        github("https://github.com/yutaplug/yutaplugins")
+        github("https://github.com/sneal4you/yutaplugins")
     }
 
     configure<KtlintExtension> {
